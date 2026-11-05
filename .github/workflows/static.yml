@@ -1,0 +1,13 @@
+name: static
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax and document checks
+        run: bash scripts/static_check.sh

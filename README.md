@@ -3,7 +3,7 @@
 Stock OS Modification is a project built on the StockOS of Anbernic, which is enhanced through modifications to achieve a better user experience.
 
 ## Supported handheld models
-- RG35xx Plus (RGG35xx 2024)
+- RG35xx Plus (RG35xx 2024)
 - RG35xx H
 - RG35xxSP
 - RG28xx
@@ -25,22 +25,28 @@ Stock OS Modification is a project built on the StockOS of Anbernic, which is en
 ## Important tips
 ### Use imaging software to write the image file to TF1  
 - Windows: [Rufus (recommended)](https://rufus.ie/) or [rpi-imager](https://github.com/raspberrypi/rpi-imager/releases)  
-- Linux: [rpi-imager (recommended)](https://github.com/raspberrypi/rpi-imager/releases) or [flash_dd_with_gpt.sh](https://github.com/cbepx-me/Anbernic-H700-RG-xx-StockOS-Modification/releases/download/20260605/flash_dd_with_gpt.sh)  
-- Mac OS: [rpi-imager (recommended)](https://github.com/raspberrypi/rpi-imager/releases) or [flash_dd_with_gpt (MacOS).sh](https://github.com/cbepx-me/Anbernic-H700-RG-xx-StockOS-Modification/releases/download/20260605/flash_dd_with_gpt.MacOS.sh)
+- Linux: [rpi-imager (recommended)](https://github.com/raspberrypi/rpi-imager/releases) or [flash_dd_with_gpt.sh](flash_dd_with_gpt.sh)  
+- Mac OS: [rpi-imager (recommended)](https://github.com/raspberrypi/rpi-imager/releases) or [flash_dd_with_gpt.MacOS.sh](flash_dd_with_gpt.MacOS.sh)
+
+Those script links are the copies in this repository, so they match the commit you are reading. They are not the files attached to GitHub release `20260605`. Compared with that release:
+
+- The Linux script there accepts a bare device name such as `sdb` and prefixes `/dev/`. The script in this repository asks for a full path such as `/dev/sdb`.
+- The macOS script there lists both `.img` and `.IMG`, and its `dd` command does not use `status=progress`. The script in this repository lists `.img` only, and its `dd` command includes `status=progress`.
+
+Raspberry Pi Imager is still the recommended writer. The macOS script in this repository does not repair the GPT.
 
 ### When using programs such as BalenaEtcher and DD flash TF on MacOS or Linux systems, automatic partitioning will fail.
    - Solution: https://github.com/cbepx-me/Anbernic-H700-RG-xx-StockOS-Modification/issues/68
 
 ## Troubleshooting
-### No partitions after flashing with script - Linux
-If the storage medium seems to have no partitions in place, you should zero the device and manually format to `FAT32`, then try burning the image again.
+### No partitions after flashing with the Linux script
+If the card shows no partitions, do not zero the device and do not format it. The conversion name `fdata` is not valid for `dd`, and formatting the whole device does not repair the backup GPT.
 
-```bash
-$ sudo dd if=/dev/zero of=/path/to/device bs=32M status=progress conv=fdata
-$ sync
-$ sudo mkfs.fat -F 32 /path/to/device           
-$ ./flash_dd_with_gpt.sh
-```
+Reflash with `./flash_dd_with_gpt.sh` from this repository. When the script asks whether to repair the GPT, accept the prompt. `gdisk` has to be installed (`sudo apt install gdisk`). That step relocates the backup GPT to the end of the card. See https://github.com/cbepx-me/Anbernic-H700-RG-xx-StockOS-Modification/issues/68
+
+The macOS script does not include that repair. On Mac, write the image again with Raspberry Pi Imager.
+
+These notes describe the scripts in this repository. They were checked by reading those scripts and by rejecting the `fdata` conversion on a scratch file. No card was written.
 
 
 ## PortMaster related issues should be raised here:
@@ -50,7 +56,7 @@ https://github.com/kai4man/PortMaster-for-StockOS-MOD
 [**📋 Check the Working Ports List**](https://docs.google.com/spreadsheets/d/1UlxRCSIfNkZIiCMAgo8eFqKhsIbrLA_1d3lFdVyS4q8/edit?gid=0) - regularly updated spreadsheet with tested games.
 
 ## For more information, please visit
-https://github.com/cbepx-me/RG35xx-P-RG35xx-H-Modification/wiki
+https://github.com/cbepx-me/Anbernic-H700-RG-xx-StockOS-Modification/wiki
 
 ## Download
 ### 1. 64-bit Stock OS Mod image:

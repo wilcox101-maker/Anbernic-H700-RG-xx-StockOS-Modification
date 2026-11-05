@@ -84,10 +84,11 @@ PCE, PICO, SATURN, DREAMCAST, and many more
    - Verify device has write permissions
 
 ## Reset Options
-To completely reset all bezel configurations:
-1. Navigate to a system
-2. Press **X** to reset bezels for that system
-3. Alternatively, delete `/mnt/mod/ctrl/configs/system.cfg`
+To reset bezels for one system:
+1. Navigate to that system
+2. Press **X**
+
+**X** deletes `/mnt/mmc/anbernic/custom/<system>.cfg` when that file exists, and it sets `global.bezel=1` in `/mnt/mod/ctrl/configs/system.cfg`. It does not delete `system.cfg`. Deleting `system.cfg` would remove the other settings stored in that file.
 
 ## Version Information
 Current version: v1.2

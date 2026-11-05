@@ -125,4 +125,3 @@ Press the Menu button at any time to exit the application safely.
 - Some menu options may be hidden on certain device models
 - Changes to system settings may affect other applications
 - Always back up important data before making system changes
-```
