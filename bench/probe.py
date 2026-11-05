@@ -262,9 +262,10 @@ def run_page_touch(mem_available, clock, stop, budget_end,
         return _skipped_memory("memavailable_unavailable")
     if mem_available["value"] * 1024 < HEADROOM_BYTES:
         return _skipped_memory("low_available_memory")
-    buf = allocate(ALLOCATION_BYTES)
+    buf = None
     passes = []
     try:
+        buf = allocate(ALLOCATION_BYTES)
         for _ in range(PASSES):
             start = clock()
             deadline = start + DEADLINE_SECONDS
@@ -290,7 +291,8 @@ def run_page_touch(mem_available, clock, stop, budget_end,
             one["seconds"] = clock() - start
             passes.append(one)
     finally:
-        del buf
+        if buf is not None:
+            del buf
     return _sample("python_page_touch", "passes", passes)
 
 
@@ -339,3 +341,7 @@ def main(root="/"):
         sys.stderr.write("probe failed\n")
         return 2
     return stop.get("exit", 0)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

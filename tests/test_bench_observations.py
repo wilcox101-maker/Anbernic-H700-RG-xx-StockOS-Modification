@@ -54,6 +54,19 @@ class ObservationTests(unittest.TestCase):
         self.assertEqual(found["os_date"]["status"], "unsupported")
         self.assertEqual(found["os_date"]["reason"], "not_eight_digits")
 
+    def test_last_hardware_line_is_the_model(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            write_happy(root)
+            path = Path(root, "proc/cpuinfo")
+            path.write_text(
+                "processor : 0\nHardware : First\n"
+                "processor : 1\nHardware : LastCPU\n",
+                encoding="utf-8")
+            found = collect_observations(root)
+        self.assertEqual(found["cpu_model"]["value"], "LastCPU")
+        self.assertEqual(found["cpu_count"]["value"], 2)
+
     def test_cpu_model_missing_is_unsupported(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

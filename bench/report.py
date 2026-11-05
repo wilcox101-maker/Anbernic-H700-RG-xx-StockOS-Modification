@@ -135,10 +135,20 @@ def render_report(left, right=None):
         "thermal_millic",
     )
     for key in order:
-        parts.append(_value_line(key, observations[key]))
-    parts.append("")
-    for key, obs in observations["mounts"].items():
-        parts.append(_mount_line(key, obs))
+        obs = observations.get(key)
+        if obs is None:
+            obs = {"status": "unavailable", "reason": "missing_key"}
+        parts.append(_value_line(key, obs))
+    for key, obs in observations.items():
+        if key in order or key == "mounts":
+            continue
+        if isinstance(obs, dict) and "status" in obs:
+            parts.append(_value_line(key, obs))
+    mounts = observations.get("mounts") or {}
+    if mounts:
+        parts.append("")
+        for key, obs in mounts.items():
+            parts.append(_mount_line(key, obs))
     parts.extend([
         "",
         "## Performance timings",

@@ -54,6 +54,30 @@ class ReportTests(unittest.TestCase):
         text = render_report(left, right)
         self.assertIn("0.25", text)
 
+    def test_sample_not_ok_omits_numeric_delta(self):
+        left = document()
+        right = document()
+        right["samples"][0]["status"] = "skipped"
+        right["samples"][0]["reason"] = "timeout"
+        found = compare(left, right)
+        self.assertEqual(found["status"], "ok")
+        self.assertEqual(found["deltas"][0]["reason"], "sample_not_ok")
+        self.assertNotIn(
+            "seconds_min_right_minus_left", found["deltas"][0])
+        text = render_report(left, right)
+        self.assertIn("sample_not_ok", text)
+        self.assertTrue(all(len(line) <= 80 for line in text.splitlines()))
+
+    def test_match_key_not_ok_names_the_key(self):
+        left = document()
+        right = document()
+        right["observations"]["os_date"] = {
+            "status": "unsupported", "reason": "not_eight_digits"}
+        found = compare(left, right)
+        self.assertEqual(found["reason"], "match_key_not_ok")
+        self.assertEqual(found["key"], "os_date")
+        self.assertNotIn("deltas", found)
+
     def test_first_mismatch_blocks_deltas(self):
         left = document()
         right = document()
