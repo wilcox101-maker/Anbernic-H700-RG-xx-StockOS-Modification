@@ -5,14 +5,24 @@ an in-memory stub, so nothing is contacted. The shell assertions read the
 update scripts and do not execute them.
 """
 
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from tests.harness import ROOT, app_archive_branch, load_launcher, load_upgrade, make_downloader
+from tests.harness import (
+    ROOT,
+    _Response,
+    app_archive_branch,
+    load_launcher,
+    load_upgrade,
+    make_downloader,
+)
+from tests.harness import RecordingSession
 
 PARTIAL = b"PARTIAL-BYTES"
 BODY = b"FULL-BODY-CONTENTS"
+REMAINDER = b"-REMAINDER"
 URL = "http://example.invalid/package.bin"
 
 SHELLS = (
@@ -20,43 +30,212 @@ SHELLS = (
     ROOT / "Modified_System_Online_Upgrade/Modified_System_Online_Upgrade.sh",
 )
 
+OWNERS = (("Updater", load_upgrade), ("LauncherApp", load_launcher))
 
-def http_200_resume(module, owner_name):
-    owner = make_downloader(module, owner_name, BODY, slide=False)
+
+def run_download(module, owner_name, partial, responses):
+    owner = make_downloader(module, owner_name, b"", slide=False)
+    owner.session = RecordingSession(responses)
     with tempfile.TemporaryDirectory(prefix="anbernic-download-") as temporary:
         target = Path(temporary) / "package.bin"
-        target.write_bytes(PARTIAL)
+        if partial is not None:
+            target.write_bytes(partial)
         result = owner._download_file(URL, str(target), None, None)
         return {
             "result": result,
-            "payload": target.read_bytes(),
-            "range": owner.session.calls[0]["headers"].get("Range"),
-            "status": owner.session.response.status_code,
+            "payload": target.read_bytes() if target.exists() else None,
+            "exists": target.exists(),
+            "calls": owner.session.calls,
         }
 
 
+def response(body, status=200, **headers):
+    return _Response(body, status=status, headers=headers or None)
+
+
+def without_download_sleep(run):
+    modules = [load_upgrade(), load_launcher()]
+    original = [module.time.sleep for module in modules]
+    for module in modules:
+        module.time.sleep = lambda *_args, **_kwargs: None
+    try:
+        run()
+    finally:
+        for module, sleep in zip(modules, original):
+            module.time.sleep = sleep
+
+
+class _DroppingResponse(_Response):
+    def iter_content(self, block_size):
+        requests = sys.modules["requests"]
+        raise requests.exceptions.ConnectionError("dropped")
+
+
 class IncompleteDownloadTests(unittest.TestCase):
-    def test_current_http_200_appends_partial_file(self):
-        """CHARACTERIZATION: a 200 response is appended to the bytes already on disk."""
-        for module, owner in ((load_upgrade(), "Updater"), (load_launcher(), "LauncherApp")):
-            with self.subTest(owner=owner):
-                observed = http_200_resume(module, owner)
-                self.assertEqual(observed["result"], True)
-                self.assertEqual(observed["status"], 200)
-                self.assertEqual(observed["range"], f"bytes={len(PARTIAL)}-")
-                self.assertEqual(observed["payload"], PARTIAL + BODY)
-                self.assertNotEqual(observed["payload"], BODY)
+    def _each(self, partial, responses, check):
+        for owner_name, loader in OWNERS:
+            with self.subTest(owner=owner_name):
+                check(run_download(loader(), owner_name, partial, responses))
 
-    @unittest.expectedFailure
+    def test_fresh_http_200_writes_the_body(self):
+        def check(observed):
+            self.assertEqual(observed["result"], True)
+            self.assertEqual(observed["payload"], BODY)
+            self.assertNotIn("Range", observed["calls"][0]["headers"])
+
+        self._each(None, response(BODY), check)
+
+    def test_http_200_restarts_a_partial_file(self):
+        """A full 200 body replaces a partial file instead of appending to it."""
+        def check(observed):
+            self.assertEqual(observed["result"], True)
+            self.assertEqual(observed["calls"][0]["headers"].get("Range"), f"bytes={len(PARTIAL)}-")
+            self.assertEqual(observed["payload"], BODY)
+
+        self._each(PARTIAL, response(BODY), check)
+
     def test_acceptance_http_200_replaces_partial_file(self):
-        """ACCEPTANCE: a full 200 body replaces a partial file instead of appending.
+        """Promoted acceptance: HTTP 200 must not append onto a partial file."""
+        self._each(PARTIAL, response(BODY), lambda observed: self.assertEqual(observed["payload"], BODY))
 
-        Remove expectedFailure only in the change that fixes both downloaders.
-        """
-        for module, owner in ((load_upgrade(), "Updater"), (load_launcher(), "LauncherApp")):
-            with self.subTest(owner=owner):
-                observed = http_200_resume(module, owner)
-                self.assertEqual(observed["payload"], BODY)
+    def test_http_206_appends_a_matching_range(self):
+        start = len(PARTIAL)
+        end = start + len(REMAINDER) - 1
+        total = end + 1
+        ranged = response(
+            REMAINDER,
+            status=206,
+            **{
+                "content-range": f"bytes {start}-{end}/{total}",
+                "content-length": str(len(REMAINDER)),
+            },
+        )
+
+        def check(observed):
+            self.assertEqual(observed["result"], True)
+            self.assertEqual(observed["calls"][0]["headers"].get("Range"), f"bytes={start}-")
+            self.assertEqual(observed["payload"], PARTIAL + REMAINDER)
+
+        self._each(PARTIAL, ranged, check)
+
+    def test_http_206_full_range_restarts_instead_of_appending(self):
+        end = len(BODY) - 1
+        ranged = response(
+            BODY,
+            status=206,
+            **{"content-range": f"bytes 0-{end}/{len(BODY)}", "content-length": str(len(BODY))},
+        )
+        self._each(PARTIAL, ranged, lambda observed: self.assertEqual(observed["payload"], BODY))
+
+    def test_http_206_wrong_start_does_not_append(self):
+        ranged = response(
+            b"ABCD",
+            status=206,
+            **{"content-range": "bytes 0-3/100", "content-length": "4"},
+        )
+
+        def check(observed):
+            self.assertEqual(observed["result"], False)
+            self.assertEqual(observed["payload"], PARTIAL)
+
+        self._each(PARTIAL, ranged, check)
+
+    def test_http_206_length_mismatch_does_not_append(self):
+        ranged = response(
+            b"ABCD",
+            status=206,
+            **{"content-range": "bytes 13-16/100", "content-length": "999"},
+        )
+
+        def check(observed):
+            self.assertEqual(observed["result"], False)
+            self.assertEqual(observed["payload"], PARTIAL)
+
+        self._each(PARTIAL, ranged, check)
+
+    def test_http_206_unparseable_range_does_not_append(self):
+        ranged = response(
+            REMAINDER,
+            status=206,
+            **{"content-range": "units 13-22/23", "content-length": str(len(REMAINDER))},
+        )
+
+        def check(observed):
+            self.assertEqual(observed["result"], False)
+            self.assertEqual(observed["payload"], PARTIAL)
+
+        self._each(PARTIAL, ranged, check)
+
+    def _ranged_206(self, body):
+        start = len(PARTIAL)
+        end = start + len(body) - 1
+        total = end + 1
+        headers = {
+            "content-range": f"bytes {start}-{end}/{total}",
+            "content-length": str(len(body)),
+        }
+        return start, headers
+
+    def test_interrupted_206_does_not_append_a_following_http_200(self):
+        """A dropped resume must not append a later full HTTP 200 body."""
+        load_upgrade()
+        start, headers = self._ranged_206(REMAINDER)
+        first = _DroppingResponse(b"", status=206, headers=headers)
+
+        def check(observed):
+            self.assertEqual(observed["result"], False)
+            self.assertEqual(observed["payload"], PARTIAL)
+            self.assertEqual(observed["calls"][1]["headers"].get("Range"), f"bytes={start}-")
+
+        without_download_sleep(lambda: self._each(PARTIAL, [first, response(BODY)], check))
+
+    def test_interrupted_206_appends_a_matching_retry(self):
+        """A dropped resume still appends when the retry is the same 206 range."""
+        load_upgrade()
+        _start, headers = self._ranged_206(REMAINDER)
+        first = _DroppingResponse(b"", status=206, headers=headers)
+        second = response(REMAINDER, status=206, **headers)
+
+        def check(observed):
+            self.assertEqual(observed["result"], True)
+            self.assertEqual(observed["payload"], PARTIAL + REMAINDER)
+
+        without_download_sleep(lambda: self._each(PARTIAL, [first, second], check))
+
+    def test_http_error_leaves_the_partial_file(self):
+        def check(observed):
+            self.assertEqual(observed["result"], False)
+            self.assertEqual(observed["payload"], PARTIAL)
+            self.assertEqual(len(observed["calls"]), 1)
+
+        self._each(PARTIAL, response(b"nope", status=500), check)
+
+    def test_http_416_complete_file_is_kept(self):
+        ranged = response(
+            b"",
+            status=416,
+            **{"content-range": f"bytes */{len(PARTIAL)}", "content-length": "0"},
+        )
+
+        def check(observed):
+            self.assertEqual(observed["result"], True)
+            self.assertEqual(observed["payload"], PARTIAL)
+            self.assertEqual(len(observed["calls"]), 1)
+
+        self._each(PARTIAL, ranged, check)
+
+    def test_http_416_restarts_when_the_range_is_not_complete(self):
+        ranged = [
+            response(b"", status=416, **{"content-range": "bytes */100", "content-length": "0"}),
+            response(BODY, status=200),
+        ]
+
+        def check(observed):
+            self.assertEqual(observed["result"], True)
+            self.assertEqual(observed["payload"], BODY)
+            self.assertNotIn("Range", observed["calls"][1]["headers"])
+
+        self._each(PARTIAL, ranged, check)
 
     def test_current_cancel_leaves_the_partial_archive(self):
         """CHARACTERIZATION: cancelling an app update returns without deleting the file."""

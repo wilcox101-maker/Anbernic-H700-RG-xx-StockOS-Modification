@@ -23,6 +23,7 @@ import struct
 import subprocess
 import sys
 import time
+from download_resume import plan_resume, plan_retry
 import zipfile
 import threading
 from dataclasses import dataclass
@@ -881,29 +882,25 @@ class Updater:
 
             response.raise_for_status()
 
-            total_size = int(response.headers.get('content-length', 0))
-            if 'content-range' in response.headers:
-                content_range = response.headers['content-range']
-                if '/' in content_range:
-                    total_size = int(content_range.split('/')[-1])
-
-            if file_size > 0 and total_size > file_size:
-                total_size = total_size - file_size
-            elif file_size > 0:
-                total_size = total_size
+            plan = plan_resume(file_size, response.status_code, response.headers)
+            if plan is None:
+                LOGGER.error("Refusing inconsistent download for %s (status %s)", url, response.status_code)
+                return False
+            mode, file_size, total_size = plan
 
             block_size = 512 * 1024  # 512KB block
             downloaded = file_size
             retry_count = 0
             max_retries = 3
-
-            mode = 'ab' if file_size > 0 else 'wb'
             self._stop_all_threads()
             self._shutdown_flag = False
             thread = threading.Thread(target=self._input_poll_worker, name="input_poll")
             thread.daemon = True
             self._active_threads.append(thread)
             thread.start()
+            if self.input.slide_key():
+                LOGGER.info("Download cancelled by user")
+                return "cancelled"
 
             with open(local_path, mode) as f:
                 while retry_count <= max_retries:
@@ -941,6 +938,16 @@ class Updater:
 
                         response = self.session.get(url, stream=True, timeout=(60, 300), headers=headers)
                         response.raise_for_status()
+                        retry_plan = plan_retry(current_size, response.status_code, response.headers)
+                        if retry_plan is None:
+                            LOGGER.error(
+                                "Refusing inconsistent retry for %s (status %s)",
+                                url,
+                                response.status_code,
+                            )
+                            return False
+                        _, file_size, total_size = retry_plan
+                        downloaded = file_size
                         continue
 
             return True

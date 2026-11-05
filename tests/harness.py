@@ -42,14 +42,21 @@ class DiscardHandler(logging.Handler):
 
 
 class _Response:
-    def __init__(self, body: bytes, status: int = 200):
+    def __init__(self, body: bytes, status: int = 200, headers=None):
         self.status_code = status
         self.headers = {"content-length": str(len(body))}
+        if headers:
+            for key, value in headers.items():
+                if value is None:
+                    self.headers.pop(key, None)
+                else:
+                    self.headers[key] = value
         self._body = body
 
     def raise_for_status(self):
         if self.status_code >= 400:
-            raise OSError(f"HTTP {self.status_code}")
+            requests = sys.modules["requests"]
+            raise requests.exceptions.HTTPError(f"HTTP {self.status_code}")
 
     def iter_content(self, block_size):
         yield self._body
@@ -59,13 +66,15 @@ class _Response:
 
 
 class RecordingSession:
-    def __init__(self, response: _Response):
-        self.response = response
+    def __init__(self, response):
+        self._queue = list(response) if isinstance(response, list) else [response]
         self.calls = []
 
     def get(self, url, stream=True, timeout=None, headers=None):
         self.calls.append({"url": url, "headers": dict(headers or {})})
-        return self.response
+        if len(self._queue) == 1:
+            return self._queue[0]
+        return self._queue.pop(0)
 
 
 def _block_network():
