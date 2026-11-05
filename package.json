@@ -1,0 +1,11 @@
+{
+  "name": "anbernic-h700-stockos-mod",
+  "private": true,
+  "description": "Pinned README lint. markdownlint-cli2 0.23.2 runs markdownlint 0.41.1, the same library as the VS Code markdownlint extension, with library defaults and no rule overrides.",
+  "scripts": {
+    "lint:readme": "markdownlint-cli2 README.md"
+  },
+  "devDependencies": {
+    "markdownlint-cli2": "0.23.2"
+  }
+}
