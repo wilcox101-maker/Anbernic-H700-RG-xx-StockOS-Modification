@@ -234,3 +234,58 @@ def run_integer_loop(clock, stop, budget_end):
         repeat["seconds"] = clock() - start
         repeats.append(repeat)
     return _sample("python_integer_loop", "repeats", repeats)
+
+
+ALLOCATION_BYTES = 8388608
+STRIDE = 4096
+PASSES = 3
+STRIDE_CHECK = 256
+HEADROOM_BYTES = ALLOCATION_BYTES * 4
+
+
+def _skipped_memory(reason):
+    return {
+        "id": "python_page_touch",
+        "class": "performance",
+        "level": "python_synthetic",
+        "status": "skipped",
+        "reason": reason,
+    }
+
+
+def run_page_touch(mem_available, clock, stop, budget_end,
+                   allocate=bytearray):
+    if mem_available.get("status") != "ok":
+        return _skipped_memory("memavailable_unavailable")
+    if mem_available["value"] * 1024 < HEADROOM_BYTES:
+        return _skipped_memory("low_available_memory")
+    buf = allocate(ALLOCATION_BYTES)
+    passes = []
+    try:
+        for _ in range(PASSES):
+            start = clock()
+            deadline = start + DEADLINE_SECONDS
+            touched = 0
+            offset = 0
+            reason = None
+            while offset < ALLOCATION_BYTES:
+                if touched % STRIDE_CHECK == 0:
+                    reason = stop_reason(
+                        stop, clock, budget_end, deadline)
+                    if reason:
+                        break
+                buf[offset] = offset & 0xFF
+                offset += STRIDE
+                touched += 1
+            one = {"bytes_touched": touched}
+            if reason:
+                one["status"] = "skipped"
+                one["reason"] = reason
+                passes.append(one)
+                break
+            one["status"] = "ok"
+            one["seconds"] = clock() - start
+            passes.append(one)
+    finally:
+        del buf
+    return _sample("python_page_touch", "passes", passes)
