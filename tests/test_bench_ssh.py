@@ -186,6 +186,38 @@ class SshTests(unittest.TestCase):
         self.assertNotIn("StrictHostKeyChecking", stderr)
         self.assertNotIn("SECRET-ID", stderr)
 
+    def test_unsafe_identity_does_not_call_runner(self):
+        calls = []
+
+        def runner(*args, **kwargs):
+            calls.append(args)
+            return Completed(0, b"{}")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            err = Path(temporary, "err.txt")
+            real_err = sys.stderr
+            sys.stderr = err.open("w", encoding="utf-8")
+            try:
+                dashed = run_remote(
+                    "SOURCE", "user@example.invalid",
+                    "-oProxyCommand=echo",
+                    Path(temporary) / "a", runner,
+                    datetime(2026, 11, 5, tzinfo=timezone.utc))
+                newline = run_remote(
+                    "SOURCE", "user@example.invalid", "id\nsecret",
+                    Path(temporary) / "b", runner,
+                    datetime(2026, 11, 5, tzinfo=timezone.utc))
+            finally:
+                sys.stderr.close()
+                sys.stderr = real_err
+            stderr = err.read_text(encoding="utf-8")
+        self.assertEqual(dashed, 2)
+        self.assertEqual(newline, 2)
+        self.assertEqual(calls, [])
+        self.assertEqual(stderr, "ssh failed\nssh failed\n")
+        self.assertNotIn("ProxyCommand", stderr)
+        self.assertNotIn("example.invalid", stderr)
+
     def test_missing_ssh_binary_is_ssh_failed(self):
         def runner(command, input, timeout, capture_output):
             raise FileNotFoundError(command[0])

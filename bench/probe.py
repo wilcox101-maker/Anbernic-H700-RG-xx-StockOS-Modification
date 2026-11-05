@@ -262,6 +262,9 @@ def run_page_touch(mem_available, clock, stop, budget_end,
         return _skipped_memory("memavailable_unavailable")
     if mem_available["value"] * 1024 < HEADROOM_BYTES:
         return _skipped_memory("low_available_memory")
+    early = stop_reason(stop, clock, budget_end, None)
+    if early:
+        return _skipped_memory(early)
     buf = None
     passes = []
     try:

@@ -49,6 +49,19 @@ class MemoryTests(unittest.TestCase):
         self.assertEqual(sample["passes"][0]["bytes_touched"], 2048)
         self.assertNotIn("bandwidth", sample)
 
+    def test_cancel_does_not_allocate(self):
+        calls = []
+
+        def allocate(size):
+            calls.append(size)
+            return bytearray(size)
+
+        sample = run_page_touch(
+            ok(262144), Clock([0.0]),
+            {"reason": "cancelled"}, 20.0, allocate)
+        self.assertEqual(sample["reason"], "cancelled")
+        self.assertEqual(calls, [])
+
 
 if __name__ == "__main__":
     unittest.main()

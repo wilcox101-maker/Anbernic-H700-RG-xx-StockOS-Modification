@@ -68,6 +68,18 @@ class ReportTests(unittest.TestCase):
         self.assertIn("sample_not_ok", text)
         self.assertTrue(all(len(line) <= 80 for line in text.splitlines()))
 
+    def test_thermal_mismatch_still_prints_delta(self):
+        left = document()
+        right = document()
+        right["observations"]["thermal_millic"] = {
+            "status": "ok", "value": 1}
+        right["samples"][0]["seconds_min"] = (
+            left["samples"][0]["seconds_min"] + 0.25)
+        found = compare(left, right)
+        self.assertEqual(found["status"], "ok")
+        self.assertEqual(
+            found["deltas"][0]["seconds_min_right_minus_left"], 0.25)
+
     def test_match_key_not_ok_names_the_key(self):
         left = document()
         right = document()

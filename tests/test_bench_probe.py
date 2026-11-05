@@ -1,3 +1,4 @@
+import ast
 import io
 import json
 import signal
@@ -97,15 +98,60 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(found["samples"][1]["status"], "ok")
         self.assertEqual(calls, [8388608])
 
+    def test_full_probe_leaves_the_fixture_unchanged(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            write_happy(root)
+            before = sorted(
+                p.relative_to(root).as_posix() for p in root.rglob("*"))
+            found = probe.run_probe(
+                root, Clock([0.0]), bytearray, {"reason": None})
+            after = sorted(
+                p.relative_to(root).as_posix() for p in root.rglob("*"))
+        self.assertEqual(before, after)
+        self.assertEqual(found["samples"][0]["status"], "ok")
+        self.assertEqual(found["samples"][1]["status"], "ok")
+        self.assertEqual(
+            found["samples"][1]["passes"][0]["bytes_touched"], 2048)
+
     def test_source_has_no_write_api(self):
         text = Path(ROOT, "bench/probe.py").read_text(encoding="utf-8")
         for banned in (
-            "write_text", "subprocess", "socket", "systemctl",
-            "PYTHONPYCACHEPREFIX", "172.16.3.175",
+            "write_text", "write_bytes", "subprocess", "socket",
+            "systemctl", "PYTHONPYCACHEPREFIX", "172.16.3.175",
+            "os.system", "os.open", "Popen", "tempfile", "mkdir",
+            "unlink", "open(",
         ):
             self.assertNotIn(banned, text)
-        self.assertIn('if __name__ == "__main__":', text)
-        self.assertIn("sys.exit(main())", text)
+        tree = ast.parse(text)
+        guards = [
+            node for node in tree.body
+            if isinstance(node, ast.If)
+        ]
+        self.assertTrue(any(
+            ast.dump(node.test) == ast.dump(ast.parse(
+                '__name__ == "__main__"', mode="eval").body)
+            and "sys.exit(main())" in ast.unparse(node)
+            for node in guards
+        ))
+
+    def test_main_failure_does_not_leak_the_exception(self):
+        def boom(**_kwargs):
+            raise RuntimeError("secret-root")
+
+        previous = probe.run_probe
+        probe.run_probe = boom
+        err = io.StringIO()
+        real_err = sys.stderr
+        sys.stderr = err
+        try:
+            code = probe.main("/fixture-only")
+        finally:
+            sys.stderr = real_err
+            probe.run_probe = previous
+        self.assertEqual(code, 2)
+        self.assertEqual(err.getvalue(), "probe failed\n")
+        self.assertNotIn("secret-root", err.getvalue())
 
     def test_main_prints_one_json_object(self):
         with tempfile.TemporaryDirectory() as temporary:
