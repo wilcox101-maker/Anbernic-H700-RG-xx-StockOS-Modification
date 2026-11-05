@@ -1,14 +1,17 @@
 # RG34xxSP benchmark design
 
-Review gate only. This file is the spec. It does not add a probe, a test,
-or a device command. Implementation waits until this spec is approved.
-Earlier audit permission does not approve that work.
+This file is the approved spec, including the non-volatile constraint.
+It does not add a probe, a test, or a device command. Earlier audit
+permission does not approve the harness. The plan is a separate
+document, and the harness is still not implemented.
 
 SSH on the RG34XXSP is already working. The approved shape is one
 standard-library probe, aimed at a short Python CPU loop and a bounded
 Python memory sample. An existing SSH client is only the transport. The
 probe prints one JSON document on stdout. The laptop stores that JSON and
-renders Markdown. A read-only device run creates no result file.
+renders Markdown. The handheld run is RAM and CPU only. It makes no
+intentional persistent write: no result file, no upload, no install, no
+temporary file, and no bytecode file.
 
 ## What this is not
 
@@ -18,10 +21,19 @@ lines (board, OS date, kernel, CPU identity, memory counters, mounts,
 frequency, thermal) are observations. They are not performance results.
 Nothing here is full benchmark coverage.
 
-Version 1 has no storage test and no write under `/tmp`, `/mnt/mmc`,
-`/mnt/sdcard`, `/mnt/vendor`, or `/mnt/mod`. It does not flash, install,
-reboot, change a service, enable SSH, or embed a host, user, password, or
-key. It does not import `upgrade.py`, `launcher.py`, or any SDL module.
+Version 1 has no storage test. The probe and the SSH command must not
+write under `/tmp`, `/mnt/mmc`, `/mnt/sdcard`, `/mnt/vendor`, `/mnt/mod`,
+or anywhere else on the handheld. They must not flash, install, reboot,
+change a service, change a config file, or enable SSH. They must not
+embed a host, user, password, or key. The address `172.16.3.175` is
+runtime configuration the operator supplies. It is not a default in
+source or in tests. The probe does not import `upgrade.py`,
+`launcher.py`, or any SDL module.
+
+The operating system may still write. An SSH daemon can append a log,
+a read can update atime, and the kernel can page memory to swap. Those
+effects are OS-managed. Meeting this spec does not mean zero physical
+writes, and the report must not claim that.
 
 ## Probe
 
@@ -63,7 +75,7 @@ These keys are always present. They are not timings. A path that cannot
 be read is `unavailable` (`enoent` or `oserror`). `unsupported` is only
 for a file that was read and fails the shape rule.
 
-- `python` is `sys.version`, always `ok`.
+- `python` is the first line of `sys.version`, always `ok`.
 - `board` reads `mnt/vendor/oem/board.ini`. The value is the first line,
   stripped. An empty line is `unsupported`, reason `empty`.
 - `os_date` reads `mnt/vendor/oem/version.ini`. The value is the first
@@ -123,7 +135,8 @@ clock at start (default `time.perf_counter`). At each loop check the
 first matching reason wins: `cancelled` if the signal flag is set, else
 `probe_budget` if the 20 second budget is spent, else `timeout` if that
 repeat or pass deadline is spent. The signal handler only sets a flag.
-No later sample starts after any of those reasons.
+No later sample starts after any of those reasons. The later sample
+is `skipped` with that same reason, and its allocator is not called.
 
 ### `python_integer_loop`
 
@@ -155,7 +168,9 @@ cap.
 - Otherwise each pass writes `offset & 0xff` at every 4096-byte stride.
   Up to three passes. The deadline is 2.0 seconds per pass, checked
   every 256 strides.
-- An `ok` pass records `bytes_touched` and `seconds`. Aggregate
+- An `ok` pass records `bytes_touched` and `seconds`.
+  `bytes_touched` is the number of byte stores finished in that pass,
+  one store per stride, not a span and not a rate. Aggregate
   `seconds_min`, `seconds_median`, and `seconds_max` follow the CPU
   rule. The allocator argument defaults to `bytearray` and is called
   with `8388608` only when the sample proceeds. `finally` drops the
@@ -191,7 +206,10 @@ unless `ANBERNIC_SSH_TARGET` is set to `user@host` and
 `ANBERNIC_SSH_IDENTITY` is a path the operator already has. Neither value
 is given a default, committed, or logged in full. The command is
 `ssh -o BatchMode=yes -o ConnectTimeout=15` with that identity and
-target, running remote `python3 -`, and the probe is the remote stdin.
+target, running remote `python3 -B -`, and the probe source is the
+remote stdin. `-B` stops CPython from writing a bytecode file. The
+command does not set `PYTHONPYCACHEPREFIX`. It does not copy a file
+to the handheld.
 `BatchMode` means a missing key fails instead of asking for a password.
 Host-key checking stays at the SSH default. There is no
 `StrictHostKeyChecking=no`, no `systemctl`, and no credential file in
@@ -242,18 +260,20 @@ Required cases:
 
 The report sections, in order, are hardware observations, performance
 timings, and comparison. The timings section states the Python-synthetic
-limit in the first paragraph. Frequency in Markdown may also show
+limit in the first paragraph, and it states that the run does not
+claim zero physical writes. Frequency in Markdown may also show
 integer-divided MHz next to the raw kHz. Thermal stays in millidegrees.
 
 `npm run lint:readme` runs `markdownlint-cli2` 0.23.2 (`markdownlint`
-0.41.1) with library defaults and no rule file. It lints `README.md` and
-`docs/superpowers/specs/**/*.md`. When fixture Markdown is added, that
-file is included in the same command. No rule is disabled to clear a
-warning.
+0.41.1) with library defaults and no rule file. It lints `README.md`,
+`docs/superpowers/specs/**/*.md`, and `docs/superpowers/plans/**/*.md`.
+When fixture Markdown is added, that file is included in the same
+command. No rule is disabled to clear a warning.
 
 ## Implementation gate
 
-Approved implementation, later, is the probe, the laptop runner, the
-fixture tests, the `bench-results` gitignore, and the lint path for the
-fixture report. It is not part of this change. Do not connect to the
-device to review this document.
+The design is approved only with the non-volatile constraint above.
+The next document is the implementation plan. The probe, the laptop
+runner, the fixture tests, and the `bench-results` gitignore are still
+not in this tree. Do not connect to the handheld to review either
+document.
