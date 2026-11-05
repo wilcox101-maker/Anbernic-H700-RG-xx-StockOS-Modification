@@ -43,7 +43,9 @@ class _Redirect:
         object.__setattr__(self, "chosen", value)
 
 
-def run_failed_install():
+def run_install(mode):
+    if mode not in ("fail", "raise", "ok"):
+        raise AssertionError(mode)
     upgrade = load_upgrade()
     if INSTALL_CANARY.exists():
         INSTALL_CANARY.unlink()
@@ -67,13 +69,19 @@ def run_failed_install():
                 "script": script.read_bytes(),
             }
         )
-        return subprocess.CompletedProcess(args, 1, stdout="", stderr="install failed")
+        if mode == "raise":
+            raise subprocess.TimeoutExpired(args, 300)
+        code = 0 if mode == "ok" else 1
+        stderr = "" if mode == "ok" else "install failed"
+        return subprocess.CompletedProcess(args, code, stdout="", stderr=stderr)
 
     def refuse(command, *args, **kwargs):
         raise AssertionError(f"refusing process execution: {command}")
 
     def draw(title, subtitle=None, icon=None, status="info"):
-        messages.append(title)
+        messages.append(
+            {"title": title, "subtitle": subtitle, "icon": icon, "status": status}
+        )
 
     def reboot(ui, cfg, auto=False):
         reboots.append(auto)
@@ -153,24 +161,54 @@ def run_failed_install():
     return {"messages": messages, "reboots": reboots, "sleeps": sleeps}
 
 
+def _titles(result):
+    return [message["title"] for message in result["messages"]]
+
+
+def _failed_message(result):
+    failed = [message for message in result["messages"] if "Installation Failed" in message["title"]]
+    if len(failed) != 1:
+        raise AssertionError(result["messages"])
+    return failed[0]
+
+
 class FailedInstallTests(unittest.TestCase):
-    def test_current_failed_install_reports_success_and_reboots(self):
-        """CHARACTERIZATION: return code 1 still announces success and reboots."""
-        result = run_failed_install()
-        self.assertTrue(any("Installation Failed" in title for title in result["messages"]))
-        self.assertTrue(any("Installation Complete" in title for title in result["messages"]))
+    def test_nonzero_install_reports_failure_and_does_not_reboot(self):
+        """A nonzero install.sh stops before the success message and reboot."""
+        result = run_install("fail")
+        failed = _failed_message(result)
+        self.assertIn("exit 1", failed["subtitle"])
+        self.assertIn("install failed", failed["subtitle"])
+        self.assertEqual(failed["status"], "error")
+        self.assertFalse(any("Installation Complete" in title for title in _titles(result)))
+        self.assertFalse(any("Ready, start upgrading" in (message["subtitle"] or "") for message in result["messages"]))
+        self.assertEqual(result["reboots"], [])
+        self.assertNotIn(3, result["sleeps"])
+
+    def test_acceptance_failed_install_does_not_reboot_or_report_complete(self):
+        """Promoted acceptance: return code 1 is a failure, not a reboot."""
+        result = run_install("fail")
+        self.assertEqual(result["reboots"], [])
+        self.assertFalse(any("Installation Complete" in title for title in _titles(result)))
+        self.assertIn("exit 1", _failed_message(result)["subtitle"])
+
+    def test_install_launch_error_reports_failure_and_does_not_reboot(self):
+        """A launch error such as a timeout is shown and does not reboot."""
+        result = run_install("raise")
+        failed = _failed_message(result)
+        self.assertIn("timed out", failed["subtitle"])
+        self.assertEqual(failed["status"], "error")
+        self.assertFalse(any("Installation Complete" in title for title in _titles(result)))
+        self.assertEqual(result["reboots"], [])
+
+    def test_successful_install_reports_complete_and_reboots(self):
+        """Return code 0 still announces completion and reboots."""
+        result = run_install("ok")
+        self.assertTrue(any("Installation Complete" in title for title in _titles(result)))
+        self.assertFalse(any("Installation Failed" in title for title in _titles(result)))
+        self.assertTrue(any("Ready, start upgrading" in (message["subtitle"] or "") for message in result["messages"]))
         self.assertEqual(result["reboots"], [False])
         self.assertIn(3, result["sleeps"])
-
-    @unittest.expectedFailure
-    def test_acceptance_failed_install_does_not_reboot_or_report_complete(self):
-        """ACCEPTANCE: a failed install.sh must stop before reboot.
-
-        Remove expectedFailure only in the change that fixes start_update.
-        """
-        result = run_failed_install()
-        self.assertEqual(result["reboots"], [])
-        self.assertFalse(any("Installation Complete" in title for title in result["messages"]))
 
     def test_extractall_onto_root_and_network_are_refused(self):
         load_upgrade()

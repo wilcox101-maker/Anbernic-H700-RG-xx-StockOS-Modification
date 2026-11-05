@@ -1,6 +1,6 @@
 # Device-free regression tests
 
-These tests cover three updater failure paths. OS version checks require a missing or malformed date to stay fail-closed. The install, download, and shell checks still describe bugs that are open. Nothing here writes to a device or executes `install.sh` or the update shell scripts.
+These tests cover three updater failure paths. OS version checks stay fail-closed for a missing or malformed date. A failed `install.sh` reports that failure and does not reboot. The download and shell checks still describe bugs that are open. Nothing here writes to a device or executes `install.sh` or the update shell scripts.
 
 Run them from the repository root:
 
@@ -21,8 +21,8 @@ Acceptance tests for bugs that are still open use `unittest.expectedFailure`. Wh
 | `test_known_dates_keep_their_channels` | Anchor | `20240101` stays on `source/` and does not qualify; `20251101` stays on `source/` and does qualify; `20251206` selects `390/`; `20260520` selects `400/` |
 | `test_missing_version_does_not_qualify`, `test_literal_unknown_does_not_qualify`, `test_empty_version_file_does_not_qualify`, `test_malformed_versions_do_not_qualify` | Corrected behavior | Missing, empty, Unknown, and malformed version.ini stay on `source/` and do not qualify for append or mod update |
 | `test_acceptance_*_does_not_select_400_or_offer_append` | Promoted acceptance | Same fail-closed contract for missing, empty, and Unknown |
-| `test_current_failed_install_reports_success_and_reboots` | Characterization | `install.sh` return code 1 still shows Installation Complete and reboots |
-| `test_acceptance_failed_install_does_not_reboot_or_report_complete` | Acceptance, expected failure | A failed install must not reboot or report completion |
+| `test_nonzero_install_reports_failure_and_does_not_reboot`, `test_install_launch_error_reports_failure_and_does_not_reboot`, `test_acceptance_failed_install_does_not_reboot_or_report_complete` | Corrected behavior | Nonzero `install.sh` and launch errors show the failure and do not reboot |
+| `test_successful_install_reports_complete_and_reboots` | Anchor | Return code 0 still reports completion and reboots |
 | `test_current_http_200_appends_partial_file` | Characterization | HTTP 200 appends the full body onto a partial file in both downloaders |
 | `test_acceptance_http_200_replaces_partial_file` | Acceptance, expected failure | HTTP 200 should leave exactly the response body |
 | `test_current_cancel_leaves_the_partial_archive` | Characterization | Cancelling an app update leaves the partial file in place |
