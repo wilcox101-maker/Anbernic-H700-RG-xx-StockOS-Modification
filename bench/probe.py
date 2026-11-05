@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import os
+import signal
 import statistics
 import sys
+import time
 from pathlib import Path
 
 MOUNT_KEYS = (
@@ -289,3 +292,50 @@ def run_page_touch(mem_available, clock, stop, budget_end,
     finally:
         del buf
     return _sample("python_page_touch", "passes", passes)
+
+
+def run_probe(root="/", clock=None, allocate=bytearray, stop=None):
+    if clock is None:
+        clock = time.perf_counter
+    if stop is None:
+        stop = {"reason": None}
+    observations = collect_observations(root)
+    budget_end = clock() + 20.0
+    cpu = run_integer_loop(clock, stop, budget_end)
+    if cpu["status"] != "ok":
+        memory = {
+            "id": "python_page_touch",
+            "class": "performance",
+            "level": "python_synthetic",
+            "status": "skipped",
+            "reason": cpu["reason"],
+        }
+    else:
+        memory = run_page_touch(
+            observations["mem_available_kib"],
+            clock, stop, budget_end, allocate)
+    return {"observations": observations, "samples": [cpu, memory]}
+
+
+def handle_signal(stop, signum, _frame):
+    stop["reason"] = "cancelled"
+    if signum == signal.SIGINT:
+        stop["exit"] = 130
+    else:
+        stop["exit"] = 143
+
+
+def main(root="/"):
+    stop = {"reason": None}
+    signal.signal(
+        signal.SIGINT, lambda s, f: handle_signal(stop, s, f))
+    signal.signal(
+        signal.SIGTERM, lambda s, f: handle_signal(stop, s, f))
+    try:
+        document = run_probe(root=root, stop=stop)
+        sys.stdout.write(json.dumps(document, sort_keys=True))
+        sys.stdout.write("\n")
+    except Exception:
+        sys.stderr.write("probe failed\n")
+        return 2
+    return stop.get("exit", 0)
