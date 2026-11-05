@@ -1,6 +1,6 @@
 # Device-free regression tests
 
-These tests cover three updater failure paths. OS version checks stay fail-closed for a missing or malformed date. A failed `install.sh` reports that failure and does not reboot. The download and shell checks still describe bugs that are open. Nothing here writes to a device or executes `install.sh` or the update shell scripts.
+These tests cover three updater failure paths. OS version checks stay fail-closed for a missing or malformed date. A failed `install.sh` reports that failure and does not reboot. A partial download is replaced on HTTP 200 and appended only for a matching HTTP 206, including a retry after a dropped connection. Cancelling an app update still leaves the archive in place, and the update scripts still extract that archive without a checksum. Nothing here writes to a device or executes `install.sh` or the update shell scripts.
 
 Run them from the repository root:
 
@@ -23,8 +23,10 @@ Acceptance tests for bugs that are still open use `unittest.expectedFailure`. Wh
 | `test_acceptance_*_does_not_select_400_or_offer_append` | Promoted acceptance | Same fail-closed contract for missing, empty, and Unknown |
 | `test_nonzero_install_reports_failure_and_does_not_reboot`, `test_install_launch_error_reports_failure_and_does_not_reboot`, `test_acceptance_failed_install_does_not_reboot_or_report_complete` | Corrected behavior | Nonzero `install.sh` and launch errors show the failure and do not reboot |
 | `test_successful_install_reports_complete_and_reboots` | Anchor | Return code 0 still reports completion and reboots |
-| `test_current_http_200_appends_partial_file` | Characterization | HTTP 200 appends the full body onto a partial file in both downloaders |
-| `test_acceptance_http_200_replaces_partial_file` | Acceptance, expected failure | HTTP 200 should leave exactly the response body |
+| `test_http_200_restarts_a_partial_file`, `test_acceptance_http_200_replaces_partial_file` | Corrected behavior | HTTP 200 replaces a partial file in both downloaders |
+| `test_http_206_appends_a_matching_range`, `test_interrupted_206_appends_a_matching_retry` | Anchor | A 206 that starts at the bytes on disk is appended, including after a dropped connection |
+| `test_http_206_full_range_restarts_instead_of_appending`, `test_http_206_wrong_start_does_not_append`, `test_http_206_length_mismatch_does_not_append`, `test_http_206_unparseable_range_does_not_append`, `test_interrupted_206_does_not_append_a_following_http_200` | Corrected behavior | A 206 that is not that continuation, and a retry that comes back as HTTP 200, are refused and leave the partial file unchanged |
+| `test_fresh_http_200_writes_the_body`, `test_http_416_complete_file_is_kept`, `test_http_416_restarts_when_the_range_is_not_complete`, `test_http_error_leaves_the_partial_file` | Anchor | A fresh 200, a complete 416, a 416 that restarts, and an HTTP error keep the previous contracts |
 | `test_current_cancel_leaves_the_partial_archive` | Characterization | Cancelling an app update leaves the partial file in place |
 | `test_acceptance_cancel_does_not_leave_the_archive` | Acceptance, expected failure | Cancel should not leave that archive behind |
 | `test_current_shell_extracts_app_archive_without_a_checksum` | Characterization, source only | Both update scripts `tar -xf` `/tmp/app.tar.gz` and then delete it, with no checksum |
