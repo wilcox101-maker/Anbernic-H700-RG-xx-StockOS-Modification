@@ -16,7 +16,6 @@ import os
 import socket
 import subprocess
 import sys
-import textwrap
 import types
 import zipfile
 from pathlib import Path
@@ -230,8 +229,8 @@ def load_launcher():
     return launcher
 
 
-def append_gate_source(upgrade_path: Path) -> str:
-    """Return the real ``append_active`` statement from upgrade.py."""
+def _gate_node(upgrade_path: Path, target: str) -> ast.If:
+    """Return the real ``if`` that assigns ``target`` in upgrade.py."""
     source = upgrade_path.read_text(encoding="utf-8")
     tree = ast.parse(source)
     found = []
@@ -240,21 +239,30 @@ def append_gate_source(upgrade_path: Path) -> str:
             continue
         for stmt in node.body:
             targets = getattr(stmt, "targets", ())
-            if any(isinstance(target, ast.Name) and target.id == "append_active" for target in targets):
-                segment = ast.get_source_segment(source, node)
-                if segment:
-                    found.append(textwrap.dedent(segment))
+            if any(isinstance(item, ast.Name) and item.id == target for item in targets):
+                found.append(node)
+                break
     if len(found) != 1:
-        raise AssertionError(f"expected one append_active gate in {upgrade_path}, found {len(found)}")
-    gate = found[0]
-    if 'cur_ver == "Unknown"' not in gate or "os_cur_ver >= base_date" not in gate:
-        raise AssertionError("extracted gate is not the audited append condition:\n" + gate)
-    return gate
+        raise AssertionError(f"expected one {target} gate in {upgrade_path}, found {len(found)}")
+    segment = ast.get_source_segment(source, found[0]) or ""
+    if 'cur_ver == "Unknown"' not in segment or "os_cur_ver >= base_date" not in segment:
+        raise AssertionError(f"extracted {target} gate is not the audited condition:\n" + segment)
+    return found[0]
+
+
+def _exec_gate(module, gate: ast.If, namespace: dict):
+    globals_ = {"bool": bool}
+    qualifier = getattr(module, "is_os_date", None)
+    if qualifier is not None:
+        globals_["is_os_date"] = qualifier
+    module_node = ast.Module(body=[gate], type_ignores=[])
+    ast.fix_missing_locations(module_node)
+    exec(compile(module_node, str(module.__file__), "exec"), globals_, namespace)
 
 
 def append_offered(module, cur_ver: str, data_ver: str, data_url: str) -> bool:
     """Execute the real append gate against this import's channel globals."""
-    gate = append_gate_source(Path(module.__file__))
+    gate = _gate_node(Path(module.__file__), "append_active")
     namespace = {
         "cur_ver": cur_ver,
         "data_ver": data_ver,
@@ -264,14 +272,32 @@ def append_offered(module, cur_ver: str, data_ver: str, data_url: str) -> bool:
         "os_cur_ver": module.os_cur_ver,
         "append_active": False,
     }
-    exec(gate, {"bool": bool}, namespace)
+    _exec_gate(module, gate, namespace)
     return bool(namespace["append_active"])
+
+
+def update_offered(module) -> bool:
+    """Execute the real update gate for an unknown mod version and a real manifest."""
+    gate = _gate_node(Path(module.__file__), "update_active")
+    namespace = {
+        "cur_ver": "Unknown",
+        "update_ver": "4.0.4",
+        "data_ver": "4.0.0",
+        "update_file_list": ["patch.zip"],
+        "base_ver": module.base_ver,
+        "base_date": module.base_date,
+        "os_cur_ver": module.os_cur_ver,
+        "update_active": False,
+        "new_ver": None,
+    }
+    _exec_gate(module, gate, namespace)
+    return bool(namespace["update_active"])
 
 
 _PROBE = r"""
 import json, os, sys
 sys.path.insert(0, os.environ["REPO_ROOT"])
-from tests.harness import append_offered, load_upgrade
+from tests.harness import append_offered, load_upgrade, update_offered
 missing = os.environ.get("VERSION_MISSING") == "1"
 text = None if missing else os.environ["VERSION_TEXT"]
 mod = load_upgrade(text, patch_version=True)
@@ -284,6 +310,7 @@ payload = {
     "append_when_mod_unknown": append_offered(
         mod, "Unknown", "4.0.4", "https://example.invalid/append.zip"
     ),
+    "update_when_mod_unknown": update_offered(mod),
     "update_log_exists": os.path.exists(log_path),
 }
 print("PROBE " + json.dumps(payload))

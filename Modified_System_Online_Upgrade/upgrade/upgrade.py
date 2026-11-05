@@ -54,15 +54,28 @@ logging.basicConfig(
 LOGGER = logging.getLogger("upgrade")
 LOGGER.info(f"=== Start Log ===")
 
+def is_os_date(value: str) -> bool:
+    """OS builds are selected by an 8-digit YYYYMMDD string.
+
+    Anything else, including a missing file and the sentinel ``Unknown``,
+    must not pass a date comparison. ``"Unknown" >= "20260520"`` is true.
+    """
+    return len(value) == 8 and value.isdigit()
+
+
 def read_current_os_version() -> str:
     try:
         os_ver_cfg_path: str = "/mnt/vendor/oem/version.ini"
         ver_file = Path(os_ver_cfg_path)
-        if ver_file.exists():
-            ver = ver_file.read_text().splitlines()[0]
+        if not ver_file.exists():
+            LOGGER.warning(f"OS Date version file not found: {ver_file}")
+            return "Unknown"
+        lines = ver_file.read_text().splitlines()
+        ver = lines[0] if lines else ""
+        if is_os_date(ver):
             LOGGER.info("Current OS Date version: %s", ver)
             return ver
-        LOGGER.warning(f"OS Date version file not found: {ver_file}")
+        LOGGER.warning("OS date version is not YYYYMMDD: %s", ver)
     except Exception as e:
         LOGGER.error("Error reading OS Date version file: %s", e)
     return "Unknown"
@@ -73,12 +86,12 @@ base_ver = "3.8.0"
 base_date = "20250211"
 source = "source/"
 
-if os_cur_ver >= "20251206":
+if is_os_date(os_cur_ver) and os_cur_ver >= "20251206":
     base_ver = "3.9.0"
     base_date = "20251206"
     source = "390/"
 
-if os_cur_ver >= "20260520":
+if is_os_date(os_cur_ver) and os_cur_ver >= "20260520":
     base_ver = "3.9.9"
     base_date = "20260520"
     source = "400/"
@@ -1941,14 +1954,14 @@ exit 0
         if (
                 cur_ver != "Unknown" and data_ver != "Unknown" and base_ver <= cur_ver < data_ver and bool(data_update_url)
         ) or (
-                cur_ver == "Unknown" and os_cur_ver >= base_date and data_ver != "Unknown" and bool(data_update_url)
+                cur_ver == "Unknown" and is_os_date(os_cur_ver) and os_cur_ver >= base_date and data_ver != "Unknown" and bool(data_update_url)
         ):
             append_active = True
 
         if (
                 cur_ver != "Unknown" and update_ver != "Unknown" and base_ver <= cur_ver < update_ver and data_ver < update_ver and bool(update_file_list)
         ) or (
-                cur_ver == "Unknown" and os_cur_ver >= base_date and update_ver != "Unknown" and data_ver < update_ver and bool(update_file_list)
+                cur_ver == "Unknown" and is_os_date(os_cur_ver) and os_cur_ver >= base_date and update_ver != "Unknown" and data_ver < update_ver and bool(update_file_list)
         ):
             update_active = True
             new_ver = update_ver
