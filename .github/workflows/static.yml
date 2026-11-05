@@ -13,7 +13,7 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-      - name: README markdownlint
+      - name: Markdown lint
         run: npm ci && npm run lint:readme
       - name: Syntax and document checks
         run: bash scripts/static_check.sh
