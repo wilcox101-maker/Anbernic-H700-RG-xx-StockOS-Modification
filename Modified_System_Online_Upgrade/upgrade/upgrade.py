@@ -1657,17 +1657,31 @@ class Updater:
                                     LOGGER.error(f"install.sh failed with return code {result.returncode}")
                                     LOGGER.error(f"stdout: {result.stdout}")
                                     LOGGER.error(f"stderr: {result.stderr}")
-                                    self.draw_message_center(f'{self.t.t("Installation Failed")}: {item["filename"]}',
-                                                             "✘", "error")
+                                    detail = (result.stderr or result.stdout or "").strip()
+                                    subtitle = f"exit {result.returncode}"
+                                    if detail:
+                                        subtitle = f"{subtitle}: {detail}"
+                                    self.draw_message_center(
+                                        f'{self.t.t("Installation Failed")}: {item["filename"]}',
+                                        subtitle,
+                                        "✘",
+                                        "error",
+                                    )
                                     shutil.rmtree(install_tmp_path, ignore_errors=True)
+                                    return
                                 LOGGER.info(f"install.sh executed successfully")
                                 self.draw_message_center(f'{self.t.t("Installation Complete")}: {item["filename"]}', "✔",
                                                          "success")
                             except Exception as e:
                                 LOGGER.error(f"Error executing install.sh: {e}")
-                                self.draw_message_center(f'{self.t.t("Installation Failed")}: {item["filename"]}', "✘",
-                                                         "error")
+                                self.draw_message_center(
+                                    f'{self.t.t("Installation Failed")}: {item["filename"]}',
+                                    str(e),
+                                    "✘",
+                                    "error",
+                                )
                                 shutil.rmtree(install_tmp_path, ignore_errors=True)
+                                return
                     else:
                         LOGGER.error(f"Error unpacking update file: {item['filename']}")
                         self.draw_message_center(t.t("Extraction Error"), t.t("Failed to extract update files."), "✘",
